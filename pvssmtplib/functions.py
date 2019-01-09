@@ -115,7 +115,7 @@ class ExceptionReportingConfig:
 
 
     def traceback(self, ex):
-        traceback.format_exc()
+        return traceback.format_exc()
 
     def unpack_except(self, ex):
         result = []
