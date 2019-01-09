@@ -25,7 +25,7 @@ def smtp_send(smtp_conf, template, msg):
 
     smtp_connection.sendmail(
             template.sender,
-            template.to,
+            recipients,
             msg.as_string()
         )
     smtp_connection.quit()
