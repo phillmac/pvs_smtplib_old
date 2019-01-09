@@ -1,79 +1,99 @@
-import smtplib, os
+import smtplib, os, traceback, pytz, datetime, logging
 from email.utils import COMMASPACE
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-def send_email(smtp, template, msg_body_text, msg_body_html):
-        s = smtplib.SMTP_SSL(smtp.host, smtp.port)
-        s.login(smtp.username, smtp.password)
 
-        msgtext = '\n'.join(msg_body_text)
-        msghtml = '<br>'.join(msg_body_html)
+def smtp_connect(smtp):
+    if smtp.ssl:
+        smtp_connection = smtplib.SMTP_SSL(smtp.host, smtp.port)
+    else:
+        smtp_connection = smtplib.SMTP(smtp.host, smtp.port)
+    
+    smtp_connection.login(smtp.username, smtp.password)
 
+    return smtp_connection
 
-        msg = MIMEMultipart(
-            "alternative",
-            None,
-            [MIMEText(msgtext),
-            MIMEText(msghtml,'html')]
-        )
+def smtp_send(smtp_conf, template, msg):
+    logger = logging.getLogger(__name__)
+    smtp_connection = smtp_connect(smtp_conf)
+    
+    msg['Subject'] = template.subject
+    msg['From'] = template.sender
+    recipients = [k for k, v in template.to.items() if v]
+    msg['To'] = COMMASPACE.join(recipients)
 
-        msg['Subject'] = template.subject
-        msg['From'] = template.sender
-        recivers = [k for k, v in template.to.items() if v]
-        msg['To'] = COMMASPACE.join(recivers)
-
-        s.sendmail(
+    smtp_connection.sendmail(
             template.sender,
             template.to,
             msg.as_string()
         )
-        s.quit()
-        print("Email sent")
+    smtp_connection.quit()
+    logger.info("Email sent")
+    
 
-def send_email_text(smtp, template, msg_body_text):
-        s = smtplib.SMTP_SSL(smtp.host, smtp.port)
-        s.login(smtp.username, smtp.password)
+def send_email(smtp_conf, template, msg_body_text, msg_body_html):
+    msgtext = '\n'.join(msg_body_text)
+    msghtml = '<br>'.join(msg_body_html)
 
-        msgtext = '\n'.join(msg_body_text)
 
-        msg = MIMEText(msgtext)
+    msg = MIMEMultipart(
+        "alternative",
+        None,
+        [MIMEText(msgtext),
+        MIMEText(msghtml,'html')]
+    )
 
-        msg['Subject'] = template.subject
-        msg['From'] = template.sender
-        recivers = [k for k, v in template.to.items() if v]
-        msg['To'] = COMMASPACE.join(recivers)
+    smtp_send(smtp_conf, template, msg)
 
-        s.sendmail(
-            template.sender,
-            template.to,
-            msg.as_string()
+def send_email_text(smtp_conf, template, msg_body_text):
+    msgtext = '\n'.join(msg_body_text)
+
+    msg = MIMEText(msgtext)
+
+    smtp_send(smtp_conf, template, msg)
+
+
+def send_email_html(smtp_conf, template, msg_body_html):
+    msghtml = '<br>'.join(msg_body_html)
+    send_email_html_raw(smtp_conf, template, msghtml)
+
+def send_email_html_raw(smtp_conf, template, msghtml):
+
+    msg = MIMEText(msghtml,'html')
+
+    smtp_send(smtp_conf, template, msg)
+
+def send_email_exception(subject, ex, logs=[]):
+    logger = logging.getLogger(__name__)
+    try:
+        erc = ExceptionReportingConfig()
+        message = [get_timestamp()]
+        message.append(erc.format_except(ex))
+        message.extend(logs)
+        logger.warn(message)
+        template = EmailTemplate(
+            to = {os.environ['EMAIL_NOTIFY_TO']: True},
+            sender = os.environ['EMAIL_NOTIFY_FROM'],
+            subject = subject
         )
-        s.quit()
-        print("Email sent")
+        
+        send_email_text(SMTPConfig(), template, message)
+    except Exception:
+        logger.error(traceback.format_exc())
 
-def send_email_html(smtp, template, msg_body_html):
-        msghtml = '<br>'.join(msg_body_html)
-        send_email_html_raw(smtp, template, msghtml)
+def format_date(d):
+    return d.strftime('%y-%m-%d %H:%M:%S %Z')
 
-def send_email_html_raw(smtp, template, msghtml):
-        s = smtplib.SMTP_SSL(smtp.host, smtp.port)
-        s.login(smtp.username, smtp.password)
+def get_timestamp():
 
-        msg = MIMEText(msghtml,'html')
+    if 'TZ_NAME' in os.environ:
+        tz_name = os.environ['TZ_NAME']
+    else:
+        tz_name = 'UTC'
+    timezone = pytz.timezone(tz_name)
+    return format_date(datetime.datetime.now(timezone))
 
-        msg['Subject'] = template.subject
-        msg['From'] = template.sender
-        recivers = [k for k, v in template.to.items() if v]
-        msg['To'] = COMMASPACE.join(recivers)
-
-        s.sendmail(
-            template.sender,
-            template.to,
-            msg.as_string()
-        )
-        s.quit()
-        print("Email sent")
 
 class EmailTemplate:
 
@@ -81,6 +101,33 @@ class EmailTemplate:
         self.sender = sender
         self.to = to
         self.subject = subject
+
+class ExceptionReportingConfig:
+    def __init__(self):
+        if  not "EXCEPTION_FORMATTER" in  os.environ:
+            self.format_except = self.traceback
+        elif os.environ['EXCEPTION_FORMATTER'] == 'traceback':
+            self.format_except = self.traceback
+        elif os.environ['EXCEPTION_FORMATTER'] == 'unpack_except':
+            self.format_except = self.unpack_except
+        else:
+            self.format_except = self.traceback
+
+
+    def traceback(self, ex):
+        traceback.format_exc()
+
+    def unpack_except(self, ex):
+        result = []
+        result.append(type(ex).__name__)
+        for arg in ex.args:
+            if isinstance(arg, Exception):
+                result.extend(self.unpack_except(arg))
+            elif isinstance(arg, list):
+                result.append(''.join(arg))
+            else:
+                result.append(str(arg))
+        return '\n'.join(result)
 
 class SMTPConfig:
 
