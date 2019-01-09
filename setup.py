@@ -3,7 +3,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 setuptools.setup(
     name='pvs-smtplib',  
-    version='0.1.0',
+    version='0.1.1',
     author="Peel Valley Softwware",
     author_email="info@peelvalley.com.au",
     description="Custom smtp client wrapper",
